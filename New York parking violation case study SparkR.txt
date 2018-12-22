@@ -1,0 +1,3006 @@
+# Group Case Study
+
+# 1. Load SparkR
+spark_path <- '/usr/local/spark'
+if (nchar(Sys.getenv("SPARK_HOME")) < 1) {
+  Sys.setenv(SPARK_HOME = spark_path)
+}
+library(SparkR, lib.loc = c(file.path(Sys.getenv("SPARK_HOME"), "R", "lib")))
+
+# Initialise the sparkR session
+sparkR.session(master = "yarn-client", sparkConfig = list(spark.driver.memory = "1g"))
+
+#library
+library(sparklyr)
+library(stringr)
+
+################################  For Fiscal Year 2015 ####################################################
+
+# 2. Create a Spark DataFrame and examine structure
+
+df_2015<-SparkR::read.df("/common_folder/nyc_parking/Parking_Violations_Issued_-_Fiscal_Year_2015.csv", "CSV", header="true", inferSchema = "true")
+str(df_2015)
+
+
+head(df_2015)
+
+# Examine the size
+nrow(df_2015)
+# 11809233
+ncol(df_2015)
+#51
+# Remove spaces and special characters from column names, replace with underscore
+#df_colnames<-colnames(df_2015)
+colnames(df_2015) <- str_trim(colnames(df_2015), side = "both")
+colnames(df_2015) <- gsub(" ","_",colnames(df_2015)) # removed identified blank spaces
+colnames(df_2015) <- gsub("\\?", "", colnames(df_2015)) # removed identified special characters
+
+printSchema(df_2015)
+
+#check duplicate number
+df_2015_distinct <- df_2015 %>% distinct()
+nrow(df_2015_distinct) # number of rows found 10951257 
+#lets check the count to get the idea about the available duplicate values
+nrow(df_2015) # 10951257 , original data frame had 11809233 rows
+
+# Removing duplicate records on Summon Numbers
+df_2015 <- dropDuplicates(df_2015, "Summons_Number")
+
+# Before executing any hive-sql query from RStudio, you need to add a jar file in RStudio 
+sql("ADD JAR /opt/cloudera/parcels/CDH/lib/hive/lib/hive-hcatalog-core-1.1.0-cdh5.11.2.jar")
+
+# Create view for SQL queries
+createOrReplaceTempView(df_2015, "data_2015")
+
+#treat NA values
+# Columns No Standing or Stopping Violation, Hydrant Violation, Double Parking Violation have all NA values
+
+#lets check the NULL values for all required columns
+Null_Violation_Post_Code_cnt_data_2015 <- SparkR::sql("select count(*) from data_2015 where  Violation_Post_Code is null")
+head(Null_Violation_Post_Code_cnt_data_2015) # 2842008 Null values
+
+# lets check the NULL values for column summon number
+Null_summon_no_data_2015 <- SparkR::sql("select count(*) from data_2015 where  Summons_Number is null")
+head(Null_summon_no_data_2015) # 0 Null values
+
+# lets check the NULL values for column registration state
+Null_Registration_State_data_2015 <- SparkR::sql("select count(*) from data_2015 where  Registration_State is null")
+head(Null_Registration_State_data_2015) # 0 Null values
+
+# lets check the NULL values for column violation location
+Null_Violation_Location_data_2015 <- SparkR::sql("select count(*) from data_2015 where  Violation_Location is null")
+head(Null_Violation_Location_data_2015) # 1633006 Null values
+
+# lets check the NULL values for column violation code
+Null_Violation_Code_data_2015 <- SparkR::sql("select count(*) from data_2015 where  Violation_Code is null")
+head(Null_Violation_Code_data_2015) # 0 Null values
+
+# lets check the NULL values for column Vehicle Body Type
+Null_Vehicle_Body_Type_data_2015 <- SparkR::sql("select count(*) from data_2015 where  Vehicle_Body_Type is null")
+head(Null_Vehicle_Body_Type_data_2015) # 41197 Null values
+
+# lets check the NULL values for column Vehicle Make
+Null_Vehicle_Make_data_2015 <- SparkR::sql("select count(*) from data_2015 where  Vehicle_Make is null")
+head(Null_Vehicle_Make_data_2015) # 68276 Null values
+
+# lets check the NULL values for column Violation Precinct
+Null_Violation_Precinct_data_2015 <- SparkR::sql("select count(*) from data_2015 where  Violation_Precinct is null")
+head(Null_Violation_Precinct_data_2015) # 0 Null values
+
+# lets check the NULL values for column House_Number
+Null_House_Number_data_2015 <- SparkR::sql("select count(*) from data_2015 where  House_Number is null")
+head(Null_House_Number_data_2015) # 1806394 Null values
+
+# lets check the NULL values for column Street_Name
+Null_Street_Name_data_2015 <- SparkR::sql("select count(*) from data_2015 where  Street_Name is null")
+head(Null_Street_Name_data_2015) # 5463 Null values
+
+# lets check the NULL values for column Intersecting_Street
+Null_Intersecting_Street_data_2015 <- SparkR::sql("select count(*) from data_2015 where Intersecting_Street is null")
+head(Null_Intersecting_Street_data_2015) # 7966442 Null values
+
+# Removing all records not in fiscal year : 1st July 2015 to 31st June 2016. 
+
+df_2015_clean<-SparkR::sql("select * from data_2015 where 
+                           (year(to_date(Issue_Date,'MM/dd/yyyy')) = 2014 and month(to_date(Issue_Date,'MM/dd/yyyy')) in (7,8,9,10,11,12))
+                           or
+                           (year(to_date(Issue_Date,'MM/dd/yyyy')) = 2015 and month(to_date(Issue_Date,'MM/dd/yyyy')) in (1,2,3,4,5,6))")
+
+#Examine the data
+
+#Que-1 
+#Find the total number of tickets for each year.
+nrow(df_2015_clean)
+# 10598035  tickets for fiscal 2014-2015
+
+head(df_2015_clean)
+
+
+
+# Create view for SQL queries
+createOrReplaceTempView(df_2015_clean, "df_2015_clean")
+
+
+#Que-2
+# Find out the number of unique states from where the cars that got parking tickets came from. 
+df_2015_clean_states <-SparkR::sql("select Registration_State, count(*) as count from df_2015_clean group by Registration_State order by count desc")
+head(df_2015_clean_states, 100)
+
+# Unique registration states are 69 Found one code as 99. Replacing it with NY, the code with highest tickets
+# Registration_State   count                                                   
+# 1                  NY 8255530
+# 2                  NJ  969222
+# 3                  PA  261192
+# 4                  CT  144719
+# 5                  FL  133980
+# 6                  MA   91211
+# 7                  IN   77473
+# 8                  VA   70479
+# 9                  MD   56946
+# 10                 NC   53083
+# 11                 99   39238
+# 12                 IL   38670
+# 13                 GA   34330
+# 14                 TX   30712
+# 15                 AZ   27674
+# 16                 OH   24787
+# 17                 CA   22484
+# 18                 ME   22430
+# 19                 SC   22117
+# 20                 OK   21735
+# 21                 TN   20630
+# 22                 MI   17964
+# 23                 MN   16804
+# 24                 DE   15520
+# 25                 RI   14180
+# 26                 NH    9284
+# 27                 VT    7560
+# 28                 AL    6974
+# 29                 WA    6329
+# 30                 QB    5798
+# 31                 ON    5721
+# 32                 OR    5586
+# 33                 IA    5522
+# 34                 ID    5371
+# 35                 WI    4959
+# 36                 DP    4747
+# 37                 KY    4247
+# 38                 DC    4198
+# 39                 MS    4134
+# 40                 CO    4112
+# 41                 MO    3653
+# 42                 NM    3429
+# 43                 AR    3267
+# 44                 LA    3158
+# 45                 NV    2268
+# 46                 WV    2133
+# 47                 NE    1846
+# 48                 KS    1502
+# 49                 GV    1400
+# 50                 SD    1322
+# 51                 UT    1109
+# 52                 AK    1023
+# 53                 NS     810
+# 54                 MT     764
+# 55                 ND     564
+# 56                 HI     484
+# 57                 AB     341
+# 58                 WY     322
+# 59                 PR     260
+# 60                 BC     257
+# 61                 PE     196
+# 62                 NB     165
+# 63                 MX      34
+# 64                 MB      28
+# 65                 SK      22
+# 66                 FO       8
+# 67                 NF       7
+# 68                 NT       6
+# 69                 YT       5
+
+#lets convert the numeric entry from registration state to NY
+df_2015_clean$Registration_State <- ifelse(df_2015_clean$Registration_State == "99", "NY", df_2015_clean$Registration_State)
+
+# Recreating view with revised data
+createOrReplaceTempView(df_2015_clean, "df_2015_clean")
+
+# Again finding out the number of unique states from where the cars that got parking tickets came from. 
+df_2015_clean_states <-SparkR::sql("select Registration_State, count(*) as count from df_2015_clean group by Registration_State order by count desc")
+head(df_2015_clean_states, 100)
+
+# Registration_State   count                                                   
+# 1                  NY 8294768
+# 2                  NJ  969222
+# 3                  PA  261192
+# 4                  CT  144719
+# 5                  FL  133980
+# 6                  MA   91211
+# 7                  IN   77473
+# 8                  VA   70479
+# 9                  MD   56946
+# 10                 NC   53083
+# 11                 IL   38670
+# 12                 GA   34330
+# 13                 TX   30712
+# 14                 AZ   27674
+# 15                 OH   24787
+# 16                 CA   22484
+# 17                 ME   22430
+# 18                 SC   22117
+# 19                 OK   21735
+# 20                 TN   20630
+# 21                 MI   17964
+# 22                 MN   16804
+# 23                 DE   15520
+# 24                 RI   14180
+# 25                 NH    9284
+# 26                 VT    7560
+# 27                 AL    6974
+# 28                 WA    6329
+# 29                 QB    5798
+# 30                 ON    5721
+# 31                 OR    5586
+# 32                 IA    5522
+# 33                 ID    5371
+# 34                 WI    4959
+# 35                 DP    4747
+# 36                 KY    4247
+# 37                 DC    4198
+# 38                 MS    4134
+# 39                 CO    4112
+# 40                 MO    3653
+# 41                 NM    3429
+# 42                 AR    3267
+# 43                 LA    3158
+# 44                 NV    2268
+# 45                 WV    2133
+# 46                 NE    1846
+# 47                 KS    1502
+# 48                 GV    1400
+# 49                 SD    1322
+# 50                 UT    1109
+# 51                 AK    1023
+# 52                 NS     810
+# 53                 MT     764
+# 54                 ND     564
+# 55                 HI     484
+# 56                 AB     341
+# 57                 WY     322
+# 58                 PR     260
+# 59                 BC     257
+# 60                 PE     196
+# 61                 NB     165
+# 62                 MX      34
+# 63                 MB      28
+# 64                 SK      22
+# 65                 FO       8
+# 66                 NF       7
+# 67                 NT       6
+# 68                 YT       5
+
+#Que-3
+##check the number of tickets which don’t have the address for violation location on them
+## Violation address is assumed as a combination of house number, street name, interseting street and violation location
+violation_add_null_2015 <-SparkR::sql("select count(Summons_Number) tickets from df_2015_clean 
+                                where  House_Number is null and Street_Name is null and Intersecting_Street is null
+                                and Violation_Location is null")
+head(violation_add_null_2015)
+#Ans 2097
+
+## ALTERNATE ASSUMPTION
+## Violation address is assumed as Violation_Location ONLY
+violation_add_null_2015<-SparkR::sql("select count(Summons_Number) tickets from df_2015_clean 
+                                where  Violation_Location is null")
+head(violation_add_null_2015)
+#Ans 1455166
+
+
+
+## Aggregation task
+
+#Que-1
+
+
+#How often does each violation code occur? Display the frequency of the top five violation codes.
+violation_code_freq_2015<-SparkR::sql("select Violation_Code, count(Summons_Number) tickets from df_2015_clean
+                                 group by Violation_Code order by tickets desc")
+head(violation_code_freq_2015,5)
+
+
+# Violation_Code tickets                                                        
+# 1             21 1469228
+# 2             38 1305007
+# 3             14  908418
+# 4             36  747098
+# 5             37  735600
+
+#Que-2
+#How often does each 'vehicle body type' get a parking ticket? How about the 'vehicle make'? 
+vehicle_body_freq_2015<-SparkR::sql("select Vehicle_Body_Type, count(Summons_Number) tickets from df_2015_clean
+                               group by Vehicle_Body_Type order by tickets desc")
+
+head(vehicle_body_freq_2015,5)
+
+# Vehicle_Body_Type tickets                                                     
+# 1              SUBN 3341110
+# 2              4DSD 3001810
+# 3               VAN 1570227
+# 4              DELV  822040
+# 5               SDN  428571
+
+
+vehicle_make_freq_2015<-SparkR::sql("select Vehicle_Make, count(Summons_Number) tickets from df_2015_clean
+                               group by Vehicle_Make order by tickets desc")
+head(vehicle_make_freq_2015,5)
+# Vehicle_Make tickets                                                          
+# 1         FORD 1373157
+# 2        TOYOT 1082206
+# 3        HONDA  982130
+# 4        CHEVR  811659
+# 5        NISSA  805572
+
+#Que-3
+#Find the (5 highest) frequency of tickets for Violation Precinct
+
+#A.Violation Precinct
+violation_precint_freq_2015<-SparkR::sql("select Violation_Precinct, count(Summons_Number) tickets from df_2015_clean
+                                    where Violation_Precinct != 0 
+                                    group by Violation_Precinct order by tickets desc" )
+head(violation_precint_freq_2015,5)
+# Violation_Precinct tickets                                                    
+# 1                 19  550797
+# 2                 18  393802
+# 3                 14  377750
+# 4                  1  302737
+# 5                114  295855
+
+#B.Issuer Precinct
+issuer_precint_freq_2015<-SparkR::sql("select  Issuer_Precinct, count(Summons_Number) tickets from df_2015_clean
+                                 where  Issuer_Precinct != 0 
+                                 group by  Issuer_Precinct order by tickets desc" )
+head(issuer_precint_freq_2015,5)
+
+# Issuer_Precinct tickets                                                       
+# 1              19  536627
+# 2              18  384863
+# 3              14  363734
+# 4               1  293942
+# 5             114  291100
+
+#Que-4
+#Find the violation code frequency across three precincts which have issued the most number of tickets
+
+# Most number of tickets issued are having violation code as 21, 38, 14
+
+### by using union all
+
+violation_code_issued_precint_freq_2015<-SparkR::sql("select Violation_Code, count(Summons_Number) tickets from
+                                  (select  Violation_Code, Summons_Number  from df_2015_clean
+                                  where  Issuer_Precinct =21   
+                                         union all
+                                         select  Violation_Code, Summons_Number  from df_2015_clean
+                                  where  Issuer_Precinct =38  
+                                         union all
+                                         select  Violation_Code, Summons_Number  from df_2015_clean
+                                  where  Issuer_Precinct =14) group by Violation_Code order by tickets desc")
+head(violation_code_issued_precint_freq_2015,10)
+
+# Violation_Code tickets                                                       
+# 1              69   79330
+# 2              14   75991
+# 3              31   40410
+# 4              42   27755
+# 5              47   26811
+# 6              46    9975
+# 7              17    8924
+# 8              19    8831
+# 9              84    8552
+# 10             38    6727
+
+##### ALTERNATIVE--- By avoiding union all
+violation_code_issued_precint_freq_2015<-SparkR::sql("select  Violation_Code, count(Summons_Number) tickets from df_2015_clean
+                                         where  Issuer_Precinct in( 19,18,14) 
+                                         group by  Violation_Code order by tickets desc" )
+head(violation_code_issued_precint_freq_2015,10)
+# Violation_Code tickets                                                       
+# 1              14  254978
+# 2              69  140479
+# 3              38  114163
+# 4              37   90571
+# 5              31   72703
+# 6              46   69341
+# 7              16   66036
+# 8              21   61973
+# 9              47   57199
+# 10             42   48604
+
+## OBSERVATION - violation code 14 and 69 have exceptionally high frequency.
+## Aanalyzing these across issuer precints.
+violation_code_high_precint_freq_2015<-SparkR::sql("select Issuer_Precinct, count(Summons_Number) tickets 
+                                  from df_2015_clean where Violation_Code in ( 14,69) 
+                                  group by Issuer_Precinct order by tickets desc")
+
+
+head(violation_code_high_precint_freq_2015, nrow(violation_code_high_precint_freq_2015))
+
+### violation code 14 and 69 are found in 319 precints. The count of tickets is more than 100 in amost 98 precints
+
+# Issuer_Precinct tickets                                                     
+# 1                18  175514
+# 2                14  155315
+# 3                17   97624
+# 4                 1   86566
+# 5                13   72899
+# 6                19   64628
+# 7                10   41521
+# 8                84   38778
+# 9                 6   24270
+# 10              109   23657
+# 11                5   20113
+# 12                9   19212
+# 13               20   18560
+# 14              103   16872
+# 15              112   14011
+# 16              115   11520
+# 17                7   10659
+# 18               33   10386
+# 19               52   10286
+# 20               90    9948
+# 21               23    8258
+# 22              108    7724
+# 23               70    7718
+# 24              110    7268
+# 25               34    7187
+# 26              114    7022
+# 27              107    6601
+# 28              104    6474
+# 29               77    6423
+# 30              102    6045
+# 31               61    6020
+# 32               79    5921
+# 33               67    5729
+# 34               94    5648
+# 35               24    5537
+# 36               88    5490
+# 37               68    5231
+# 38               44    4809
+# 39               49    4793
+# 40               71    4761
+# 41              105    4748
+# 42               26    4739
+# 43               66    4737
+# 44               45    4552
+# 45               46    4186
+# 46                0    4186
+# 47               50    4159
+# 48               28    4094
+# 49               40    3838
+# 50               47    3835
+# 51              120    3819
+# 52              106    3624
+# 53               60    3557
+# 54               78    3540
+# 55               43    3314
+# 56              161    3146
+# 57               72    3072
+# 58               83    3026
+# 59              122    2920
+# 60               48    2840
+# 61               75    2780
+# 62               63    2716
+# 63               73    2675
+# 64              113    2576
+# 65               62    2536
+# 66               76    2533
+# 67              111    2531
+# 68              401    2499
+# 69               25    2359
+# 70               32    2068
+# 71               30    2019
+# 72              420    1802
+# 73              100    1741
+# 74              101    1622
+# 75               69    1574
+# 76               81    1491
+# 77              121    1396
+# 78              163    1337
+# 79              165    1153
+# 80               42    1011
+# 81              164     949
+# 82               41     935
+# 83              504     860
+# 84              136     847
+# 85              123     759
+# 86              302     603
+# 87              642     529
+# 88              405     410
+# 89              162     397
+# 90                2     371
+# 91              506     314
+# 92                4     300
+# 93              976     247
+# 94              406     197
+# 95              169     173
+# 96              839     154
+# 97              574     151
+# 98              170     140
+# 99              824     138
+# 100             501     134
+# 101             413     105
+# 102             137      95
+# 103             972      76
+# 104             968      74
+# 105             502      62
+# 106             720      59
+# 107             977      47
+# 108             730      46
+# 109             171      46
+# 110             883      44
+# 111             442      43
+# 112               3      43
+# 113             411      36
+# 114             801      35
+# 115             497      34
+# 116             135      31
+# 117             141      28
+# 118             167      27
+# 119             863      27
+# 120             840      22
+# 121             139      21
+# 122             964      21
+# 123              27      20
+# 124             152      20
+# 125              16      20
+# 126             926      18
+# 127             802      18
+# 128             985      17
+# 129              22      17
+# 130             412      17
+# 131              89      16
+# 132              15      16
+# 133             804      15
+# 134              12      15
+# 135             118      14
+# 136             407      14
+# 137             803      13
+# 138             982      12
+# 139             219      12
+# 140             483      12
+# 141             222      12
+# 142               8      12
+# 143             172      12
+# 144             806      11
+# 145             138      11
+# 146              74      11
+# 147             446      10
+# 148              11       9
+# 149             168       9
+# 150             805       9
+# 151             470       9
+# 152              29       9
+# 153             276       9
+# 154             140       8
+# 155             822       8
+# 156             400       8
+# 157              65       8
+# 158              37       8
+# 159             835       8
+# 160              64       7
+# 161             920       7
+# 162             410       7
+# 163             408       6
+# 164             869       6
+# 165             779       6
+# 166              21       6
+# 167             870       6
+# 168             875       5
+# 169              97       5
+# 170             156       5
+# 171             807       5
+# 172             490       5
+# 173             290       5
+# 174             808       5
+# 175              96       4
+# 176             415       4
+# 177             116       4
+# 178             142       4
+# 179             124       4
+# 180              99       4
+# 181              39       4
+# 182             878       4
+# 183             402       4
+# 184             447       4
+# 185             426       4
+# 186             837       4
+# 187             435       4
+# 188             211       3
+# 189             166       3
+# 190             235       3
+# 191              80       3
+# 192             455       3
+# 193             850       3
+# 194             421       3
+# 195             301       3
+# 196             130       3
+# 197              87       3
+# 198             871       3
+# 199             404       3
+# 200             425       3
+# 201             189       3
+# 202             809       3
+# 203              31       3
+# 204             829       3
+# 205             700       3
+# 206              36       3
+# 207             509       2
+# 208              93       2
+# 209             125       2
+# 210             143       2
+# 211             307       2
+# 212             692       2
+# 213             180       2
+# 214             868       2
+# 215             601       2
+# 216             500       2
+# 217             736       2
+# 218             821       2
+# 219             524       2
+# 220              54       2
+# 221             128       2
+# 222             133       2
+# 223             117       2
+# 224             160       2
+# 225             132       2
+# 226              95       2
+# 227             862       2
+# 228              85       2
+# 229             523       2
+# 230              58       2
+# 231             900       2
+# 232              59       2
+# 233             131       2
+# 234             294       2
+# 235             616       2
+# 236              86       2
+# 237             881       2
+# 238             174       2
+# 239             701       2
+# 240             994       2
+# 241             520       2
+# 242             176       2
+# 243             264       2
+# 244             946       2
+# 245              91       2
+# 246              82       2
+# 247              98       2
+# 248             436       2
+# 249             304       2
+# 250             149       2
+# 251             148       1
+# 252             540       1
+# 253             481       1
+# 254             874       1
+# 255             362       1
+# 256             667       1
+# 257             530       1
+# 258             908       1
+# 259             867       1
+# 260             939       1
+# 261             126       1
+# 262             209       1
+# 263             861       1
+# 264             183       1
+# 265             185       1
+# 266             146       1
+# 267             564       1
+# 268             742       1
+# 269             450       1
+# 270             860       1
+# 271             417       1
+# 272              51       1
+# 273             646       1
+# 274             467       1
+# 275              92       1
+# 276             544       1
+# 277             579       1
+# 278             671       1
+# 279             214       1
+# 280             882       1
+# 281             305       1
+# 282             819       1
+# 283             423       1
+# 284             619       1
+# 285             202       1
+# 286             196       1
+# 287             503       1
+# 288             962       1
+# 289             220       1
+# 290             278       1
+# 291             864       1
+# 292             932       1
+# 293             664       1
+# 294             629       1
+# 295             672       1
+# 296             514       1
+# 297             239       1
+# 298             928       1
+# 299             320       1
+# 300             560       1
+# 301             181       1
+# 302             507       1
+# 303             480       1
+# 304             967       1
+# 305             740       1
+# 306             550       1
+# 307             383       1
+# 308             547       1
+# 309             618       1
+# 310             469       1
+# 311             478       1
+# 312              56       1
+# 313             708       1
+# 314             525       1
+# 315             147       1
+# 316             398       1
+# 317             765       1
+# 318             971       1
+# 319             342       1
+# 320             761       1
+# 321             905       1
+# 322             281       1
+# 323             184       1
+# 324             648       1
+# 325             996       1
+# 326             643       1
+# 327             134       1
+# 328             670       1
+# 329             194       1
+# 330             261       1
+# 331             257       1
+# 332             945       1
+# 333             697       1
+# 334             866       1
+# 335             203       1
+# 336             640       1
+# 337             859       1
+# 338             666       1
+# 339             940       1
+# 340             668       1
+# 341             424       1
+# 342             201       1
+# 343             119       1
+# 344             365       1
+# 345             357       1
+# 346             557       1
+# 347             584       1
+# 348             705       1
+# 349             422       1
+# 350             249       1
+# 351             510       1
+# 352             892       1
+# 353             820       1
+# 354             949       1
+
+#Que-5
+#find out the properties of parking violations across different times of the day:
+#A. Find a way to deal with missing values, if any.
+
+
+violation_code_high_precint_freq_2015<-SparkR::sql("select Issuer_Precinct, count(Summons_Number) tickets 
+                                  from df_2015_clean where Violation_Code in ( 14,69) 
+                                  group by Issuer_Precinct order by tickets desc")
+
+
+head(violation_code_high_precint_freq_2015, nrow(violation_code_high_precint_freq_2015))
+
+# Top 5 records
+# Issuer_Precinct tickets                                                     
+# 1                18  175514
+# 2                14  155315
+# 3                17   97624
+# 4                 1   86566
+# 5                13   72899
+
+# Question 5 - Analyzing violation codes over day timeslots
+## Separating hour and am / pm value from violation time
+df_2015_clean$violation_time_hour<-SparkR::substr(df_2015_clean$Violation_Time,1,2)
+head(summarize(group_by(df_2015_clean,df_2015_clean$violation_time_hour),count=n(df_2015_clean$violation_time_hour)),200)
+
+df_2015_clean$violation_time_ampm<-SparkR::substr(df_2015_clean$Violation_Time,5,5)
+head(summarize(group_by(df_2015_clean,df_2015_clean$violation_time_ampm),count=n(df_2015_clean$violation_time_ampm)),100)
+
+## Creating view
+createOrReplaceTempView(df_2015_clean, "data_2015_violation_time")
+## Creating bins for 6 timeslots of the day. All incorrect, blank and null values of hour are put under bin as invalid. Same is not included in further analyis
+df_violation_time_bins_2015 <- SparkR::sql("SELECT Violation_Code, 
+            CASE  WHEN (violation_time_hour in ('00','01','02','03') and violation_time_ampm ='A')  THEN 'Midnight'
+            WHEN (violation_time_hour in ('04','05','06','07') and violation_time_ampm ='A')  THEN 'EarlyMorning'
+            WHEN (violation_time_hour in ('08','09','10','11') and violation_time_ampm ='A')  THEN 'Morning'
+            WHEN (violation_time_hour in ('12','01','02','03') and violation_time_ampm ='P')  THEN 'Afternoon'
+            WHEN (violation_time_hour in ('04','05','06','07') and violation_time_ampm ='P')  THEN 'Evening'
+            WHEN (violation_time_hour in ('08','09','10','11') and violation_time_ampm ='P')  THEN 'Night'
+            ELSE 'INVALID' END  as timeslot FROM data_2015_violation_time")
+
+
+createOrReplaceTempView(df_violation_time_bins_2015, "data_2015_violation_time_bins")
+
+## Finding top 3 violoation code for each timeslot
+df_violation_time_code_2015<-SparkR::sql("(SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2015_violation_time_bins where timeslot = 'Midnight' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2015_violation_time_bins where timeslot = 'EarlyMorning' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2015_violation_time_bins where timeslot = 'Morning' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2015_violation_time_bins where timeslot = 'Afternoon' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2015_violation_time_bins where timeslot = 'Evening' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2015_violation_time_bins where timeslot = 'Night' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)")
+
+head(df_violation_time_code_2015,25)
+
+
+# timeslot Violation_Code tickets
+# 1      Midnight             21   62055
+# 2      Midnight             40   35114
+# 3      Midnight             78   33482
+# 4  EarlyMorning             14  132344
+# 5  EarlyMorning             21  103874
+# 6  EarlyMorning             40   89611
+# 7       Morning             21 1167097
+# 8       Morning             38  442655
+# 9       Morning             36  353555
+# 10    Afternoon             38  559950
+# 11    Afternoon             37  411842
+# 12    Afternoon             36  317228
+# 13      Evening             38  237513
+# 14      Evening             37  173008
+# 15      Evening             14  145602
+# 16        Night              7   69973
+# 17        Night             38   61530
+# 18        Night             14   44554
+
+### Finding timeslots for 3 most commonly occuring violation codes
+
+df_top_3_violoation_code_2015<-SparkR::sql("SELECT Violation_Code, count(*) tickets from data_2015_violation_time_bins 
+                                         group by  Violation_Code order by tickets desc limit 3")
+head(df_top_3_violoation_code_2015)
+
+# Top 3 violation code are 21, 36, 38 
+# Violation_Code tickets                                                        
+# 1             21 1469228
+# 2             38 1305007
+# 3             14  908418
+
+df_top_3_violoation_code_2015_timeslot<-SparkR::sql("SELECT Violation_Code,timeslot, count(*) tickets from data_2015_violation_time_bins 
+                                            where Violation_Code in (21,38,14) and timeslot != 'INVALID'
+                                         group by  Violation_Code ,timeslot order by Violation_Code,tickets desc")
+
+head(df_top_3_violoation_code_2015_timeslot, 25)
+
+### Top 3 violation (21, 38, 14) codes have highest occurance in morning and afternoon
+
+# Violation_Code     timeslot tickets                                          
+# 1              14      Morning  292903
+# 2              14    Afternoon  263562
+# 3              14      Evening  145602
+# 4              14 EarlyMorning  132344
+# 5              14        Night   44554
+# 6              14     Midnight   25691
+# 7              21      Morning 1167097
+# 8              21    Afternoon  131158
+# 9              21 EarlyMorning  103874
+# 10             21     Midnight   62055
+# 11             21      Evening     775
+# 12             21        Night     530
+# 13             38    Afternoon  559950
+# 14             38      Morning  442655
+# 15             38      Evening  237513
+# 16             38        Night   61530
+# 17             38 EarlyMorning    2783
+# 18             38     Midnight     509
+
+### Question 6 - finding seasonality
+
+## Assumed seasons - Spring -MArch to May, Summer - June to August, Fall - September to November, WInter-December to February
+
+df_violation_season_bins <- SparkR::sql("SELECT Violation_Code, 
+            CASE  WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (3,4,5) ) THEN 'Spring'
+            WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (6,7,8) ) THEN 'Summer'
+            WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (9,10,11) ) THEN 'Fall'
+            WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (12,1,2) ) THEN 'Winter'
+            ELSE 'INVALID' END  as season FROM data_2015_violation_time")
+
+createOrReplaceTempView(df_violation_season_bins, "data_2015_violation_season_bins")
+
+df_violation_season_count<-SparkR::sql("SELECT season, count(*) tickets from data_2015_violation_season_bins
+                                        group by season order by tickets desc")
+head(df_violation_season_count,5)
+# season tickets                                                                
+# 1 Spring 2860987
+# 2 Summer 2838306
+# 3   Fall 2718502
+# 4 Winter 2180240
+
+## Maximum tickets are found in Spring
+
+
+## Finding top 3 violoation code for each season
+df_violation_season_code<-SparkR::sql("(SELECT season, Violation_Code, count(*) tickets 
+                                    from data_2015_violation_season_bins where season = 'Spring' group by season, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT season, Violation_Code, count(*) tickets 
+                                    from data_2015_violation_season_bins where season = 'Summer' group by season, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT season, Violation_Code, count(*) tickets 
+                                    from data_2015_violation_season_bins where season = 'Fall' group by season, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT season, Violation_Code, count(*) tickets 
+                                    from data_2015_violation_season_bins where season = 'Winter' group by season, Violation_Code 
+                                    order by tickets desc limit 3)
+                                      ")
+
+head(df_violation_season_code,20)
+# season Violation_Code tickets
+# 1  Spring             21  425163
+# 2  Spring             38  327048
+# 3  Spring             14  243622
+# 4  Summer             21  439632
+# 5  Summer             38  344262
+# 6  Summer             14  239339
+# 7    Fall             21  351390
+# 8    Fall             38  326700
+# 9    Fall             14  232300
+# 10 Winter             38  306997
+# 11 Winter             21  253043
+# 12 Winter             14  193157
+
+## Violation 21, 38 and 14 are found as most frequent code for most of the seasons
+
+## Question 7 -
+# top 3 violation codes as found above
+
+df_top_3_violoation_code_2015<-SparkR::sql("SELECT Violation_Code, count(*) tickets from df_2015_clean 
+                                         group by  Violation_Code order by tickets desc limit 3")
+head(df_top_3_violoation_code_2015)
+# Top 3 violation code are 21, 38, 14 
+# Violation_Code tickets                                                        
+# 1             21 1469228
+# 2             38 1305007
+# 3             14  908418
+
+## CODE	DEFINITION
+#21	Street Cleaning: No parking where parking is not allowed by sign, street marking or traffic control device.
+#38	Parking Meter 
+#14	General No Standing: Standing or parking where standing is not allowed by sign, street marking or; traffic control device.	 
+
+#Finding Average Fine for Manhattan (Densly populated area)	and All Other Areas	
+##21		$65	$45	Average - 55
+##38		$65	$35	Average - 50
+##36		$115 $115	Average- 115
+
+### Finding penalties for each violation code based on the average fines
+
+df_fine_amount_2015<-SparkR::sql("SELECT Violation_Code, 
+                CASE WHEN Violation_Code = 21 THEN (55* count(*)) 
+                    WHEN Violation_Code = 38 THEN (50* count(*)) 
+                    WHEN Violation_Code = 14 THEN (115* count(*)) 
+                ELSE 1 END as fine from df_2015_clean 
+                group by  Violation_Code order by fine desc limit 3")
+
+head(df_fine_amount_2015)
+# Violation_Code      fine                                                      
+# 1             14 104468070
+# 2             21  80807540
+# 3             38  65250350
+
+### Code 14 has highest collection of fine
+            
+################################  For Fiscal Year 2016 ####################################################
+
+# 2. Create a Spark DataFrame and examine structure
+
+df_2016<-SparkR::read.df("/common_folder/nyc_parking/Parking_Violations_Issued_-_Fiscal_Year_2016.csv", "CSV", header="true", inferSchema = "true")
+str(df_2016)
+
+
+head(df_2016)
+
+# Examine the size
+nrow(df_2016)
+#10626899
+ncol(df_2016)
+#51
+# Remove spaces and special characters from column names, replace with underscore
+#df_colnames<-colnames(df_2016)
+colnames(df_2016) <- str_trim(colnames(df_2016), side = "both")
+colnames(df_2016) <- gsub(" ","_",colnames(df_2016)) # removed identified blank spaces
+colnames(df_2016) <- gsub("\\?", "", colnames(df_2016)) # removed identified special characters
+
+printSchema(df_2016)
+
+#check duplicate number
+df_2016_distinct <- df_2016 %>% distinct()
+nrow(df_2016_distinct) # number of rows found 10626899 
+#lets check the count to get the idea about the available duplicate values
+nrow(df_2016) # 10626899 , so there is no found duplicate values
+
+# Before executing any hive-sql query from RStudio, you need to add a jar file in RStudio 
+sql("ADD JAR /opt/cloudera/parcels/CDH/lib/hive/lib/hive-hcatalog-core-1.1.0-cdh5.11.2.jar")
+
+# Create view for SQL queries
+createOrReplaceTempView(df_2016, "data_2016")
+
+#treat NA values
+# Columns No Standing or Stopping Violation, Hydrant Violation, Double Parking Violation have all NA values
+
+#lets check the NULL values for all required columns
+Null_Violation_Post_Code_cnt_data_2016 <- SparkR::sql("select count(*) from data_2016 where  Violation_Post_Code is null")
+head(Null_Violation_Post_Code_cnt_data_2016) # 2997239 Null values
+
+# lets check the NULL values for column summon number
+Null_summon_no_data_2016 <- SparkR::sql("select count(*) from data_2016 where  Summons_Number is null")
+head(Null_summon_no_data_2016) # 0 Null values
+
+# lets check the NULL values for column registration state
+Null_Registration_State_data_2016 <- SparkR::sql("select count(*) from data_2016 where  Registration_State is null")
+head(Null_Registration_State_data_2016) # 0 Null values
+
+# lets check the NULL values for column violation location
+Null_Violation_Location_data_2016 <- SparkR::sql("select count(*) from data_2016 where  Violation_Location is null")
+head(Null_Violation_Location_data_2016) # 1868656 Null values
+
+# lets check the NULL values for column violation code
+Null_Violation_Code_data_2016 <- SparkR::sql("select count(*) from data_2016 where  Violation_Code is null")
+head(Null_Violation_Code_data_2016) # 0 Null values
+
+# lets check the NULL values for column Vehicle Body Type
+Null_Vehicle_Body_Type_data_2016 <- SparkR::sql("select count(*) from data_2016 where  Vehicle_Body_Type is null")
+head(Null_Vehicle_Body_Type_data_2016) # 39271 Null values
+
+# lets check the NULL values for column Vehicle Make
+Null_Vehicle_Make_data_2016 <- SparkR::sql("select count(*) from data_2016 where  Vehicle_Make is null")
+head(Null_Vehicle_Make_data_2016) # 63578 Null values
+
+# lets check the NULL values for column Violation Precinct
+Null_Violation_Precinct_data_2016 <- SparkR::sql("select count(*) from data_2016 where  Violation_Precinct is null")
+head(Null_Violation_Precinct_data_2016) # 1 Null values
+
+# lets check the NULL values for column House_Number
+Null_House_Number_data_2016 <- SparkR::sql("select count(*) from data_2016 where  House_Number is null")
+head(Null_House_Number_data_2016) # 2033420 Null values
+
+# lets check the NULL values for column Street_Name
+Null_Street_Name_data_2016 <- SparkR::sql("select count(*) from data_2016 where  Street_Name is null")
+head(Null_Street_Name_data_2016) # 8274 Null values
+
+# lets check the NULL values for column Intersecting_Street
+Null_Intersecting_Street_data_2016 <- SparkR::sql("select count(*) from data_2016 where Intersecting_Street is null")
+head(Null_Intersecting_Street_data_2016) # 7508345 Null values
+
+# Newyork fiscal year 1st July 2015 to 30th June 2016
+month_year<-SparkR::sql("select count(Summons_Number) from data_2016 where year(to_date(Issue_Date,'mm/dd/yyyy')) not in (2015,2016) ")
+head(month_year)
+
+# 3269 records do not belong to 2015 / 2016.
+
+# Removing all records not in fiscal year : 1st July 2015 to 31st June 2016. 
+
+df_2016_clean<-SparkR::sql("select * from data_2016 where 
+                           (year(to_date(Issue_Date,'MM/dd/yyyy')) = 2015 and month(to_date(Issue_Date,'MM/dd/yyyy')) in (7,8,9,10,11,12))
+                           or
+                           (year(to_date(Issue_Date,'MM/dd/yyyy')) = 2016 and month(to_date(Issue_Date,'MM/dd/yyyy')) in (1,2,3,4,5,6))")
+
+#Examine the data
+
+#Que-1 
+#Find the total number of tickets for each year.
+nrow(df_2016_clean)
+head(df_2016_clean)
+# 10396894  tickets for fiscal 2015-2016
+
+
+
+# Create view for SQL queries
+createOrReplaceTempView(df_2016_clean, "df_2016_clean")
+
+
+#Que-2
+# Find out the number of unique states from where the cars that got parking tickets came from. 
+df_2016_clean_states <-SparkR::sql("select Registration_State, count(*) as count from df_2016_clean group by Registration_State order by count desc")
+head(df_2016_clean_states, 100)
+
+# Unique registration states are 68. Found one code as 99. Replacing it with NY, the code with highest tickets
+# Registration_State   count                                                   
+# 1                  NY 8083903
+# 2                  NJ  949163
+# 3                  PA  252681
+# 4                  CT  142006
+# 5                  FL  135273
+# 6                  MA   96866
+# 7                  IN   79629
+# 8                  VA   73298
+# 9                  MD   58735
+# 10                 NC   54177
+# 11                 99   39656
+# 12                 IL   36289
+# 13                 GA   34305
+# 14                 TX   31905
+# 15                 AZ   25724
+# 16                 ME   23646
+# 17                 OH   23203
+# 18                 CA   23032
+# 19                 OK   21270
+# 20                 SC   20612
+# 21                 TN   18422
+# 22                 MI   16959
+# 23                 DE   15466
+# 24                 MN   15161
+# 25                 RI   12909
+# 26                 NH    9425
+# 27                 AL    7586
+# 28                 WA    6786
+# 29                 VT    6619
+# 30                 OR    6437
+# 31                 ON    5436
+# 32                 QB    4938
+# 33                 ID    4482
+# 34                 WI    4450
+# 35                 KY    4362
+# 36                 IA    4253
+# 37                 DC    4175
+# 38                 MS    4021
+# 39                 DP    4011
+# 40                 CO    3830
+# 41                 MO    3772
+# 42                 NM    3209
+# 43                 AR    3107
+# 44                 LA    3053
+# 45                 WV    2700
+# 46                 NV    2403
+# 47                 SD    2001
+# 48                 NE    1690
+# 49                 UT    1442
+# 50                 KS    1383
+# 51                 NS    1352
+# 52                 GV    1318
+# 53                 AK     922
+# 54                 MT     888
+# 55                 ND     685
+# 56                 HI     558
+# 57                 WY     339
+# 58                 AB     269
+# 59                 PR     217
+# 60                 BC     155
+# 61                 NB     133
+# 62                 PE     122
+# 63                 MB      31
+# 64                 SK      18
+# 65                 FO      13
+# 66                 MX       6
+# 67                 YT       5
+# 68                 NT       2
+
+#lets convert the numeric entry from registration state to NY
+df_2016_clean$Registration_State <- ifelse(df_2016_clean$Registration_State == "99", "NY", df_2016_clean$Registration_State)
+
+# Recreating view with revised data
+createOrReplaceTempView(df_2016_clean, "df_2016_clean")
+
+# Again finding out the number of unique states from where the cars that got parking tickets came from. 
+df_2016_clean_states <-SparkR::sql("select Registration_State, count(*) as count from df_2016_clean group by Registration_State order by count desc")
+head(df_2016_clean_states, 100)
+
+# Registration_State   count                                                   
+# 1                  NY 8123559
+# 2                  NJ  949163
+# 3                  PA  252681
+# 4                  CT  142006
+# 5                  FL  135273
+# 6                  MA   96866
+# 7                  IN   79629
+# 8                  VA   73298
+# 9                  MD   58735
+# 10                 NC   54177
+# 11                 IL   36289
+# 12                 GA   34305
+# 13                 TX   31905
+# 14                 AZ   25724
+# 15                 ME   23646
+# 16                 OH   23203
+# 17                 CA   23032
+# 18                 OK   21270
+# 19                 SC   20612
+# 20                 TN   18422
+# 21                 MI   16959
+# 22                 DE   15466
+# 23                 MN   15161
+# 24                 RI   12909
+# 25                 NH    9425
+# 26                 AL    7586
+# 27                 WA    6786
+# 28                 VT    6619
+# 29                 OR    6437
+# 30                 ON    5436
+# 31                 QB    4938
+# 32                 ID    4482
+# 33                 WI    4450
+# 34                 KY    4362
+# 35                 IA    4253
+# 36                 DC    4175
+# 37                 MS    4021
+# 38                 DP    4011
+# 39                 CO    3830
+# 40                 MO    3772
+# 41                 NM    3209
+# 42                 AR    3107
+# 43                 LA    3053
+# 44                 WV    2700
+# 45                 NV    2403
+# 46                 SD    2001
+# 47                 NE    1690
+# 48                 UT    1442
+# 49                 KS    1383
+# 50                 NS    1352
+# 51                 GV    1318
+# 52                 AK     922
+# 53                 MT     888
+# 54                 ND     685
+# 55                 HI     558
+# 56                 WY     339
+# 57                 AB     269
+# 58                 PR     217
+# 59                 BC     155
+# 60                 NB     133
+# 61                 PE     122
+# 62                 MB      31
+# 63                 SK      18
+# 64                 FO      13
+# 65                 MX       6
+# 66                 YT       5
+# 67                 NT       2
+
+#Que-3
+##check the number of tickets which don’t have the address for violation location on them
+## Violation address is assumed as a combination of house number, street name, interseting street and violation location
+violation_add_null<-SparkR::sql("select count(Summons_Number) tickets from df_2016_clean 
+                                where  House_Number is null and Street_Name is null and Intersecting_Street is null
+                                and Violation_Location is null")
+head(violation_add_null)
+#Ans 1216
+
+## ALTERNATE ASSUMPTION
+## Violation address is assumed as Violation_Location ONLY
+violation_add_null<-SparkR::sql("select count(Summons_Number) tickets from df_2016_clean 
+                                where  Violation_Location is null")
+head(violation_add_null)
+#Ans 1807140
+
+
+
+## Aggregation task
+
+#Que-1
+
+
+#How often does each violation code occur? Display the frequency of the top five violation codes.
+violation_code_freq<-SparkR::sql("select Violation_Code, count(Summons_Number) tickets from df_2016_clean
+                                 group by Violation_Code order by tickets desc")
+head(violation_code_freq,5)
+
+
+#Violation_Code   tickets                                                        
+#             21  1497269
+#             36  1232952
+#             38  1126835
+#             14  860045
+#             37  677805
+
+#Que-2
+#How often does each 'vehicle body type' get a parking ticket? How about the 'vehicle make'? 
+vehicle_body_freq<-SparkR::sql("select Vehicle_Body_Type, count(Summons_Number) tickets from df_2016_clean
+                               group by Vehicle_Body_Type order by tickets desc")
+head(vehicle_body_freq,5)
+#Vehicle_Body_Type  tickets                                                     
+#              SUBN   3393838
+#              4DSD   2936729
+#               VAN   1489924
+#              DELV   738747
+#               SDN   401750
+
+
+vehicle_make_freq<-SparkR::sql("select Vehicle_Make, count(Summons_Number) tickets from df_2016_clean
+                               group by Vehicle_Make order by tickets desc")
+head(vehicle_make_freq,5)
+#Vehicle_Make     tickets                                                          
+#         FORD    1297363
+#        TOYOT    1128909
+#        HONDA    991735
+#        NISSA    815963
+#        CHEVR    743416
+
+#Que-3
+#Find the (5 highest) frequency of tickets for Violation Precinct
+
+#A.Violation Precinct
+violation_precint_freq<-SparkR::sql("select Violation_Precinct, count(Summons_Number) tickets from df_2016_clean
+                                    where Violation_Precinct != 0 
+                                    group by Violation_Precinct order by tickets desc" )
+head(violation_precint_freq,5)
+#Violation_Precinct tickets                                                    
+#                 19  545669
+#                 18  325559
+#                 14  318193
+#                  1  299074
+#                114  286741
+
+#B.Issuer Precinct
+issuer_precint_freq<-SparkR::sql("select  Issuer_Precinct, count(Summons_Number) tickets from df_2016_clean
+                                 where  Issuer_Precinct != 0 
+                                 group by  Issuer_Precinct order by tickets desc" )
+head(issuer_precint_freq,5)
+
+#Issuer_Precinct tickets                                                       
+#              19  532298
+#              18  317451
+#              14  309727
+#               1  290472
+#             114  282493
+
+#Que-4
+#Find the violation code frequency across three precincts which have issued the most number of tickets
+
+# Most number of tickets issued are having violation code as 19, 18, 14
+
+### by using union all
+
+violation_code_issued_precint_freq<-SparkR::sql("select Violation_Code, count(Summons_Number) tickets from
+                                  (select  Violation_Code, Summons_Number  from df_2016_clean
+                                  where  Issuer_Precinct =19   
+                                         union all
+                                         select  Violation_Code, Summons_Number  from df_2016_clean
+                                  where  Issuer_Precinct =18  
+                                         union all
+                                         select  Violation_Code, Summons_Number  from df_2016_clean
+                                  where  Issuer_Precinct =14) group by Violation_Code order by tickets desc")
+head(violation_code_issued_precint_freq,10)
+
+# Violation_Code tickets                                                       
+# 1              14  220374
+# 2              69  117993
+# 3              46   95873
+# 4              38   95828
+# 5              37   84986
+# 6              21   63370
+# 7              31   60072
+# 8              16   59732
+# 9              47   49604
+# 10             42   42048
+
+##### ALTERNATIVE--- By avoiding union all
+violation_code_issued_precint_freq<-SparkR::sql("select  Violation_Code, count(Summons_Number) tickets from df_2016_clean
+                                         where  Issuer_Precinct in( 19,18,14) 
+                                         group by  Violation_Code order by tickets desc" )
+head(violation_code_issued_precint_freq,10)
+#Violation_Code tickets                                                       
+#              14  220374
+#              69  117993
+#              46   95873
+#              38   95828
+#              37   84986
+#              21   63370
+#              31   60072
+#              16   59732
+#              47   49604
+#             42   42048
+
+## OBSERVATION - violation code 14 and 69 have exceptionally high frequency.
+## Aanalyzing these across issuer precints.
+violation_code_high_precint_freq<-SparkR::sql("select Issuer_Precinct, count(Summons_Number) tickets 
+                                  from df_2016_clean where Violation_Code in ( 14,69) 
+                                  group by Issuer_Precinct order by tickets desc")
+
+
+head(violation_code_high_precint_freq, nrow(violation_code_high_precint_freq))
+
+### violation code 14 and 69 are found in 319 precints. The count of tickets is more than 100 in amost 98 precints
+
+# Issuer_Precinct tickets                                                     
+# 1                18  145289
+# 2                14  128232
+# 3                 1   81089
+# 4                17   73192
+# 5                13   72893
+# 6                19   64846
+# 7                10   34797
+# 8                84   31160
+# 9               109   26574
+# 10                6   19862
+# 11                5   18718
+# 12               20   18353
+# 13                9   17408
+# 14              103   15134
+# 15              112   13876
+# 16               33   12371
+# 17               90   11353
+# 18                7   11243
+# 19               52   11116
+# 20               23   11020
+# 21              115   10436
+# 22               70    9314
+# 23              108    9032
+# 24               67    7785
+# 25              110    7660
+# 26               34    7524
+# 27               77    7077
+# 28              114    6926
+# 29               68    6608
+# 30               61    6492
+# 31              107    6412
+# 32                0    6277
+# 33              104    6169
+# 34               46    6131
+# 35               88    5943
+# 36               79    5879
+# 37               94    5833
+# 38               71    5606
+# 39              102    5524
+# 40               66    5504
+# 41               24    5436
+# 42               44    5237
+# 43               60    4760
+# 44               49    4649
+# 45               78    4431
+# 46               26    4195
+# 47               75    4139
+# 48               47    4134
+# 49               45    4066
+# 50              105    3996
+# 51               28    3903
+# 52               72    3900
+# 53               43    3799
+# 54               63    3745
+# 55               40    3639
+# 56               83    3523
+# 57               32    3515
+# 58              120    3404
+# 59               62    3383
+# 60               50    3264
+# 61              106    3194
+# 62               48    3127
+# 63               73    3045
+# 64              122    2865
+# 65               76    2727
+# 66               30    2705
+# 67               69    2638
+# 68              401    2595
+# 69              111    2525
+# 70              113    2524
+# 71              161    2306
+# 72               25    2218
+# 73              420    1696
+# 74               81    1650
+# 75              100    1622
+# 76              101    1619
+# 77               41    1234
+# 78              163    1183
+# 79               42    1122
+# 80              121    1024
+# 81              504     673
+# 82              123     555
+# 83              301     520
+# 84              165     452
+# 85                2     393
+# 86              302     330
+# 87              405     303
+# 88                4     277
+# 89              642     252
+# 90              406     246
+# 91              164     235
+# 92              839     149
+# 93                3     146
+# 94              977     127
+# 95              822     106
+# 96              968     105
+# 97              801     102
+# 98              506     100
+# 99              883      97
+# 100             972      74
+# 101             730      68
+# 102             964      68
+# 103             502      66
+# 104             802      65
+# 105             501      61
+# 106             162      55
+# 107             976      54
+# 108             169      49
+# 109             152      36
+# 110             824      32
+# 111             136      27
+# 112             835      27
+# 113              16      26
+# 114             497      25
+# 115              22      24
+# 116             985      20
+# 117             574      20
+# 118             425      19
+# 119             805      19
+# 120             804      18
+# 121              27      18
+# 122             803      18
+# 123             877      17
+# 124             290      16
+# 125              89      16
+# 126              15      14
+# 127             118      13
+# 128             167      12
+# 129             808      11
+# 130              12      11
+# 131             407      11
+# 132              97       9
+# 133             447       9
+# 134             235       8
+# 135             840       8
+# 136             863       8
+# 137             806       7
+# 138             837       7
+# 139             276       7
+# 140             720       6
+# 141             222       6
+# 142              85       6
+# 143              65       6
+# 144               8       6
+# 145             219       6
+# 146             870       6
+# 147             408       5
+# 148             920       5
+# 149              57       5
+# 150              74       5
+# 151              39       4
+# 152             141       4
+# 153              56       4
+# 154             171       4
+# 155             881       4
+# 156             402       4
+# 157             982       4
+# 158             775       4
+# 159             426       4
+# 160              37       4
+# 161             172       4
+# 162             701       4
+# 163             130       3
+# 164              96       3
+# 165             160       3
+# 166             477       3
+# 167             740       3
+# 168             446       3
+# 169             166       3
+# 170             209       3
+# 171             641       3
+# 172             325       3
+# 173             116       3
+# 174             168       3
+# 175             850       3
+# 176             422       3
+# 177              91       3
+# 178             142       3
+# 179              54       3
+# 180              64       3
+# 181             789       3
+# 182             304       3
+# 183              11       3
+# 184              99       3
+# 185             679       2
+# 186             520       2
+# 187             826       2
+# 188             922       2
+# 189             470       2
+# 190             340       2
+# 191              53       2
+# 192             330       2
+# 193             403       2
+# 194              82       2
+# 195             861       2
+# 196             156       2
+# 197              29       2
+# 198             305       2
+# 199             430       2
+# 200             435       2
+# 201             807       2
+# 202             170       2
+# 203             660       2
+# 204             561       2
+# 205              58       2
+# 206             119       2
+# 207             442       2
+# 208             184       2
+# 209             530       2
+# 210             218       2
+# 211             307       2
+# 212             153       2
+# 213              86       2
+# 214             409       2
+# 215             428       2
+# 216             928       2
+# 217              80       2
+# 218             258       2
+# 219             709       2
+# 220              92       2
+# 221             127       2
+# 222             135       2
+# 223             149       2
+# 224             901       2
+# 225             410       2
+# 226             540       1
+# 227             362       1
+# 228             970       1
+# 229             211       1
+# 230             950       1
+# 231             155       1
+# 232             606       1
+# 233             460       1
+# 234             860       1
+# 235             601       1
+# 236             233       1
+# 237             625       1
+# 238             140       1
+# 239             704       1
+# 240             843       1
+# 241             274       1
+# 242             602       1
+# 243             926       1
+# 244             925       1
+# 245             176       1
+# 246              93       1
+# 247             277       1
+# 248             944       1
+# 249             776       1
+# 250             855       1
+# 251             500       1
+# 252             185       1
+# 253             492       1
+# 254             906       1
+# 255             145       1
+# 256             179       1
+# 257             212       1
+# 258             699       1
+# 259             205       1
+# 260             887       1
+# 261             440       1
+# 262             823       1
+# 263              59       1
+# 264             483       1
+# 265             629       1
+# 266              87       1
+# 267             391       1
+# 268             885       1
+# 269             869       1
+# 270             952       1
+# 271             181       1
+# 272             261       1
+# 273             237       1
+# 274             214       1
+# 275             287       1
+# 276             662       1
+# 277             735       1
+# 278             303       1
+# 279             865       1
+# 280             189       1
+# 281             675       1
+# 282             461       1
+# 283             726       1
+# 284             609       1
+# 285             231       1
+# 286              35       1
+# 287             503       1
+# 288             721       1
+# 289             677       1
+# 290             280       1
+# 291             864       1
+# 292             960       1
+# 293             252       1
+# 294             138       1
+# 295              36       1
+# 296             400       1
+# 297             509       1
+# 298             361       1
+# 299             289       1
+# 300              38       1
+# 301              98       1
+# 302             203       1
+# 303             354       1
+# 304             997       1
+# 305             150       1
+# 306             188       1
+# 307             349       1
+# 308             158       1
+# 309             962       1
+# 310             614       1
+# 311             196       1
+# 312             800       1
+# 313             670       1
+# 314             584       1
+# 315             245       1
+# 316             600       1
+# 317             965       1
+# 318             778       1
+# 319             915       1
+
+#Que-5
+#find out the properties of parking violations across different times of the day:
+#A. Find a way to deal with missing values, if any.
+
+
+violation_code_high_precint_freq<-SparkR::sql("select Issuer_Precinct, count(Summons_Number) tickets 
+                                  from df_2016_clean where Violation_Code in ( 14,69) 
+                                  group by Issuer_Precinct order by tickets desc")
+
+
+head(violation_code_high_precint_freq, nrow(violation_code_high_precint_freq))
+
+
+# Question 5 - Analyzing violation codes over day timeslots
+## Separating hour and am / pm value from violation time
+df_2016_clean$violation_time_hour<-SparkR::substr(df_2016_clean$Violation_Time,1,2)
+head(summarize(group_by(df_2016_clean,df_2016_clean$violation_time_hour),count=n(df_2016_clean$violation_time_hour)),200)
+
+head(df_2016_clean$violation_time_hour,100)
+
+df_2016_clean$violation_time_ampm<-SparkR::substr(df_2016_clean$Violation_Time,5,5)
+head(summarize(group_by(df_2016_clean,df_2016_clean$violation_time_ampm),count=n(df_2016_clean$violation_time_ampm)),100)
+
+## Creating view
+createOrReplaceTempView(df_2016_clean, "data_2016_violation_time")
+## Creating bins for 6 timeslots of the day. All incorrect, blank and null values of hour are put under bin as invalid. Same is not included in further analyis
+df_violation_time_bins <- SparkR::sql("SELECT Violation_Code, 
+            CASE  WHEN (violation_time_hour in ('00','01','02','03') and violation_time_ampm ='A')  THEN 'Midnight'
+            WHEN (violation_time_hour in ('04','05','06','07') and violation_time_ampm ='A')  THEN 'EarlyMorning'
+            WHEN (violation_time_hour in ('08','09','10','11') and violation_time_ampm ='A')  THEN 'Morning'
+            WHEN (violation_time_hour in ('12','01','02','03') and violation_time_ampm ='P')  THEN 'Afternoon'
+            WHEN (violation_time_hour in ('04','05','06','07') and violation_time_ampm ='P')  THEN 'Evening'
+            WHEN (violation_time_hour in ('08','09','10','11') and violation_time_ampm ='P')  THEN 'Night'
+            ELSE 'INVALID' END  as timeslot FROM data_2016_violation_time")
+
+
+createOrReplaceTempView(df_violation_time_bins, "data_2016_violation_time_bins")
+
+## Finding top 3 violoation code for each timeslot
+df_violation_time_code<-SparkR::sql("(SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2016_violation_time_bins where timeslot = 'Midnight' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2016_violation_time_bins where timeslot = 'EarlyMorning' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2016_violation_time_bins where timeslot = 'Morning' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2016_violation_time_bins where timeslot = 'Afternoon' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2016_violation_time_bins where timeslot = 'Evening' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2016_violation_time_bins where timeslot = 'Night' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)")
+
+head(df_violation_time_code,25)
+
+
+# timeslot Violation_Code tickets
+# 1      Midnight             21   66302
+# 2      Midnight             40   36089
+# 3      Midnight             78   28516
+# 4  EarlyMorning             14  137946
+# 5  EarlyMorning             21  110889
+# 6  EarlyMorning             40   89708
+# 7       Morning             21 1183377
+# 8       Morning             36  578035
+# 9       Morning             38  382100
+# 10    Afternoon             36  536551
+# 11    Afternoon             38  480841
+# 12    Afternoon             37  378361
+# 13      Evening             38  208759
+# 14      Evening             37  159810
+# 15      Evening             14  132446
+# 16        Night              7   56836
+# 17        Night             38   52582
+# 18        Night             40   43936
+
+### Finding timeslots for 3 most commonly occuring violation codes
+
+df_top_3_violoation_code<-SparkR::sql("SELECT Violation_Code, count(*) tickets from data_2016_violation_time_bins 
+                                         group by  Violation_Code order by tickets desc limit 3")
+head(df_top_3_violoation_code)
+# Top 3 violation code are 21, 36, 38 
+# Violation_Code tickets                                                        
+# 1             21 1497269
+# 2             36 1232952
+# 3             38 1126835
+
+df_top_3_violoation_code_timeslot<-SparkR::sql("SELECT Violation_Code,timeslot, count(*) tickets from data_2016_violation_time_bins 
+                                            where Violation_Code in (21,36,38) and timeslot != 'INVALID'
+                                         group by  Violation_Code ,timeslot order by Violation_Code,tickets desc")
+
+head(df_top_3_violoation_code_timeslot, 25)
+
+### Top 3 violation (21, 36, 38) codes have highest occurance in morning and afternoon
+
+# Violation_Code     timeslot tickets                                          
+# 1              21      Morning 1183377
+# 2              21    Afternoon  131534
+# 3              21 EarlyMorning  110889
+# 4              21     Midnight   66302
+# 5              21      Evening     559
+# 6              21        Night     407
+# 7              36      Morning  578035
+# 8              36    Afternoon  536551
+# 9              36 EarlyMorning   77657
+# 10             36      Evening   40707
+# 11             36     Midnight       1
+# 12             38    Afternoon  480841
+# 13             38      Morning  382100
+# 14             38      Evening  208759
+# 15             38        Night   52582
+# 16             38 EarlyMorning    2171
+# 17             38     Midnight     319
+## 
+
+### Question 6 - finding seasonality
+
+## Assumed seasons - Spring -MArch to May, Summer - June to August, Fall - September to November, WInter-December to February
+
+#month(to_date(Issue_Date,'MM/dd/yyyy')) in (1,2,3,4,5,6)
+
+df_violation_season_bins <- SparkR::sql("SELECT Violation_Code, 
+            CASE  WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (3,4,5) ) THEN 'Spring'
+            WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (6,7,8) ) THEN 'Summer'
+            WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (9,10,11) ) THEN 'Fall'
+            WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (12,1,2) ) THEN 'Winter'
+            ELSE 'INVALID' END  as season FROM data_2016_violation_time")
+
+createOrReplaceTempView(df_violation_season_bins, "data_2016_violation_season_bins")
+
+df_violation_season_count<-SparkR::sql("SELECT season, count(*) tickets from data_2016_violation_season_bins
+                                        group by season order by tickets desc")
+head(df_violation_season_count,5)
+# season tickets                                                                
+# 1   Fall 2971672
+# 2 Spring 2789066
+# 3 Winter 2421620
+# 4 Summer 2214536
+
+## Maximum tickets are found in fall
+
+
+## Finding top 3 violoation code for each season
+df_violation_season_code<-SparkR::sql("(SELECT season, Violation_Code, count(*) tickets 
+                                    from data_2016_violation_season_bins where season = 'Spring' group by season, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT season, Violation_Code, count(*) tickets 
+                                    from data_2016_violation_season_bins where season = 'Summer' group by season, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT season, Violation_Code, count(*) tickets 
+                                    from data_2016_violation_season_bins where season = 'Fall' group by season, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT season, Violation_Code, count(*) tickets 
+                                    from data_2016_violation_season_bins where season = 'Winter' group by season, Violation_Code 
+                                    order by tickets desc limit 3)
+                                      ")
+
+head(df_violation_season_code,20)
+# season Violation_Code tickets
+# 1  Spring             21  383448
+# 2  Spring             36  374362
+# 3  Spring             38  299439
+# 4  Summer             21  358896
+# 5  Summer             38  255600
+# 6  Summer             14  200608
+# 7    Fall             36  438320
+# 8    Fall             21  395020
+# 9    Fall             38  303387
+# 10 Winter             21  359905
+# 11 Winter             36  314765
+# 12 Winter             38  268409
+
+## Violation 21, 36 and 38 are found as most frequent code for most of the seasons
+
+## Question 7 -
+# top 3 violation codes as found above
+
+df_top_3_violoation_code<-SparkR::sql("SELECT Violation_Code, count(*) tickets from df_2016_clean 
+                                         group by  Violation_Code order by tickets desc limit 3")
+head(df_top_3_violoation_code)
+# Top 3 violation code are 21, 36, 38 
+# Violation_Code tickets                                                        
+# 1             21 1497269
+# 2             36 1232952
+# 3             38 1126835
+## CODE	DEFINITION
+#21	Street Cleaning: No parking where parking is not allowed by sign, street marking or traffic control device.
+#36	Exceeding the posted speed limit in or near a designated school zone.	
+#38	Parking Meter 
+
+#Finding Average Fine for Manhattan (Densly populated area)	and All Other Areas	
+##21		$65	$45	Average - 55
+##36		$50	$50	Average- 50
+##38		$65	$35	Average - 50
+
+### Finding penalties for each violation code based on the average fines
+
+df_fine_amount<-SparkR::sql("SELECT Violation_Code, 
+                CASE WHEN Violation_Code = 21 THEN (55* count(*)) 
+                    WHEN Violation_Code = 36 THEN (50* count(*)) 
+                    WHEN Violation_Code = 38 THEN (50* count(*)) 
+                ELSE 1 END as fine from df_2016_clean 
+                group by  Violation_Code order by fine desc limit 3")
+
+head(df_fine_amount)
+# Violation_Code     fine                                                       
+# 1             21 82349795
+# 2             36 61647600
+# 3             38 56341750
+
+### Code 21 has highest collection of fine
+            
+
+################################  For Fiscal Year 2017 ####################################################
+
+# 2. Create a Spark DataFrame and examine structure
+
+df_2017<-SparkR::read.df("/common_folder/nyc_parking/Parking_Violations_Issued_-_Fiscal_Year_2017.csv", "CSV", header="true", inferSchema = "true")
+str(df_2017)
+
+head(df_2017)
+
+# Examine the size
+nrow(df_2017)
+#10803028
+ncol(df_2017)
+#43
+# Remove spaces and special characters from column names, replace with underscore
+colnames(df_2017) <- str_trim(colnames(df_2017), side = "both")
+colnames(df_2017) <- gsub(" ","_",colnames(df_2017)) # removed identified blank spaces
+colnames(df_2017) <- gsub("\\?", "", colnames(df_2017)) # removed identified special characters
+
+printSchema(df_2017)
+
+#check duplicate number
+df_2017_distinct <- df_2017 %>% distinct()
+nrow(df_2017_distinct) # number of rows found 10803028 
+#lets check the count to get the idea about the available duplicate values
+nrow(df_2017) # 10803028  , so there is no found duplicate values
+
+# Before executing any hive-sql query from RStudio, you need to add a jar file in RStudio 
+sql("ADD JAR /opt/cloudera/parcels/CDH/lib/hive/lib/hive-hcatalog-core-1.1.0-cdh5.11.2.jar")
+
+# Create view for SQL queries
+createOrReplaceTempView(df_2017, "data_2017")
+
+#treat NA values
+# Columns No Standing or Stopping Violation, Hydrant Violation, Double Parking Violation have all NA values
+
+#lets check the NULL values for all required columns
+Null_Violation_Post_Code_cnt_data_2017 <- SparkR::sql("select count(*) from data_2017 where  Violation_Post_Code is null")
+head(Null_Violation_Post_Code_cnt_data_2017) # 3190187 Null values
+
+# lets check the NULL values for column summon number
+Null_summon_no_data_2017 <- SparkR::sql("select count(*) from data_2017 where  Summons_Number is null")
+head(Null_summon_no_data_2017) # 0 Null values
+
+# lets check the NULL values for column registration state
+Null_Registration_State_data_2017 <- SparkR::sql("select count(*) from data_2017 where  Registration_State is null")
+head(Null_Registration_State_data_2017) # 0 Null values
+
+# lets check the NULL values for column violation location
+Null_Violation_Location_data_2017 <- SparkR::sql("select count(*) from data_2017 where  Violation_Location is null")
+head(Null_Violation_Location_data_2017) # 2072400 Null values
+
+# lets check the NULL values for column violation code
+Null_Violation_Code_data_2017 <- SparkR::sql("select count(*) from data_2017 where  Violation_Code is null")
+head(Null_Violation_Code_data_2017) # 0 Null values
+
+# lets check the NULL values for column Vehicle Body Type
+Null_Vehicle_Body_Type_data_2017 <- SparkR::sql("select count(*) from data_2017 where  Vehicle_Body_Type is null")
+head(Null_Vehicle_Body_Type_data_2017) # 42695 Null values
+
+# lets check the NULL values for column Vehicle Make
+Null_Vehicle_Make_data_2017 <- SparkR::sql("select count(*) from data_2017 where  Vehicle_Make is null")
+head(Null_Vehicle_Make_data_2017) # 73047 Null values
+
+# lets check the NULL values for column Violation Precinct
+Null_Violation_Precinct_data_2017 <- SparkR::sql("select count(*) from data_2017 where  Violation_Precinct is null")
+head(Null_Violation_Precinct_data_2017) # 0 Null values
+
+# lets check the NULL values for column House_Number
+Null_House_Number_data_2017 <- SparkR::sql("select count(*) from data_2017 where  House_Number is null")
+head(Null_House_Number_data_2017) # 2288618 Null values
+
+# lets check the NULL values for column Street_Name
+Null_Street_Name_data_2017 <- SparkR::sql("select count(*) from data_2017 where  Street_Name is null")
+head(Null_Street_Name_data_2017) # 4009 Null values
+
+# lets check the NULL values for column Intersecting_Street
+Null_Intersecting_Street_data_2017 <- SparkR::sql("select count(*) from data_2017 where Intersecting_Street is null")
+head(Null_Intersecting_Street_data_2017) # 7435473 Null values
+
+# Newyork fiscal year 1st July 2016 to 30th June 2017
+month_year<-SparkR::sql("select count(Summons_Number) from data_2017 where year(to_date(Issue_Date,'mm/dd/yyyy')) not in (2016,2017) ")
+head(month_year)
+
+# 2719 records do not belong to 2016 / 2017
+
+# Removing all records not in fiscal year : 1st July 2016 to 31st June 2017. 
+
+df_2017_clean<-SparkR::sql("select * from data_2017 where 
+                           (year(to_date(Issue_Date,'MM/dd/yyyy')) = 2016 and month(to_date(Issue_Date,'MM/dd/yyyy')) in (7,8,9,10,11,12))
+                           or
+                           (year(to_date(Issue_Date,'MM/dd/yyyy')) = 2017 and month(to_date(Issue_Date,'MM/dd/yyyy')) in (1,2,3,4,5,6))")
+
+#Examine the data
+
+#Que-1 
+#Find the total number of tickets for each year.
+nrow(df_2017_clean)
+head(df_2017_clean)
+# 10539563  tickets for fiscal 2016-2017
+
+# Create view for SQL queries
+createOrReplaceTempView(df_2017_clean, "df_2017_clean")
+
+#Que-2
+# Find out the number of unique states from where the cars that got parking tickets came from. 
+df_2017_clean_states <-SparkR::sql("select Registration_State, count(*) as count from df_2017_clean group by Registration_State order by count desc")
+head(df_2017_clean_states, 100)
+
+# Unique registration states are 67. Found one code as 99. Replacing it with NY, the code with highest tickets
+# Registration_State   count                                                   
+# 1                  NY 8272874
+# 2                  NJ  905942
+# 3                  PA  278005
+# 4                  FL  140624
+# 5                  CT  137963
+# 6                  MA   83377
+# 7                  IN   79351
+# 8                  VA   70686
+# 9                  MD   60242
+# 10                 NC   54309
+# 11                 IL   36524
+# 12                 GA   35755
+# 13                 TX   35722
+# 14                 99   34720
+# 15                 AZ   25669
+# 16                 OH   24681
+# 17                 CA   23736
+# 18                 SC   21176
+# 19                 ME   21002
+# 20                 MN   17929
+# 21                 OK   17749
+# 22                 TN   16862
+# 23                 DE   15936
+# 24                 MI   15340
+# 25                 RI   11978
+# 26                 NH    8561
+# 27                 VT    7200
+# 28                 AL    6671
+# 29                 WA    6201
+# 30                 ON    5500
+# 31                 OR    5382
+# 32                 MO    4384
+# 33                 QB    4311
+# 34                 DC    4168
+# 35                 IA    4110
+# 36                 WI    4093
+# 37                 CO    4005
+# 38                 KY    3726
+# 39                 MS    3501
+# 40                 LA    3388
+# 41                 DP    3121
+# 42                 ID    2839
+# 43                 AR    2542
+# 44                 WV    2477
+# 45                 NM    2286
+# 46                 NV    1800
+# 47                 SD    1797
+# 48                 KS    1465
+# 49                 NE    1424
+# 50                 UT    1123
+# 51                 MT    1013
+# 52                 AK     735
+# 53                 NS     718
+# 54                 GV     678
+# 55                 ND     593
+# 56                 WY     404
+# 57                 HI     396
+# 58                 AB     214
+# 59                 NB     134
+# 60                 PE     128
+# 61                 BC     126
+# 62                 PR     108
+# 63                 MB      40
+# 64                 SK      30
+# 65                 FO      11
+# 66                 NT       4
+# 67                 MX       4
+
+#lets convert the numeric entry from registration state to NY
+df_2017_clean$Registration_State <- ifelse(df_2017_clean$Registration_State == "99", "NY", df_2017_clean$Registration_State)
+
+# Recreating view with revised data
+createOrReplaceTempView(df_2017_clean, "df_2017_clean")
+
+# Again finding out the number of unique states from where the cars that got parking tickets came from. 
+df_2017_clean_states <-SparkR::sql("select Registration_State, count(*) as count from df_2017_clean group by Registration_State order by count desc")
+head(df_2017_clean_states, 100)
+
+# Registration_State   count                                                   
+# 1                  NY 8307594
+# 2                  NJ  905942
+# 3                  PA  278005
+# 4                  FL  140624
+# 5                  CT  137963
+# 6                  MA   83377
+# 7                  IN   79351
+# 8                  VA   70686
+# 9                  MD   60242
+# 10                 NC   54309
+# 11                 IL   36524
+# 12                 GA   35755
+# 13                 TX   35722
+# 14                 AZ   25669
+# 15                 OH   24681
+# 16                 CA   23736
+# 17                 SC   21176
+# 18                 ME   21002
+# 19                 MN   17929
+# 20                 OK   17749
+# 21                 TN   16862
+# 22                 DE   15936
+# 23                 MI   15340
+# 24                 RI   11978
+# 25                 NH    8561
+# 26                 VT    7200
+# 27                 AL    6671
+# 28                 WA    6201
+# 29                 ON    5500
+# 30                 OR    5382
+# 31                 MO    4384
+# 32                 QB    4311
+# 33                 DC    4168
+# 34                 IA    4110
+# 35                 WI    4093
+# 36                 CO    4005
+# 37                 KY    3726
+# 38                 MS    3501
+# 39                 LA    3388
+# 40                 DP    3121
+# 41                 ID    2839
+# 42                 AR    2542
+# 43                 WV    2477
+# 44                 NM    2286
+# 45                 NV    1800
+# 46                 SD    1797
+# 47                 KS    1465
+# 48                 NE    1424
+# 49                 UT    1123
+# 50                 MT    1013
+# 51                 AK     735
+# 52                 NS     718
+# 53                 GV     678
+# 54                 ND     593
+# 55                 WY     404
+# 56                 HI     396
+# 57                 AB     214
+# 58                 NB     134
+# 59                 PE     128
+# 60                 BC     126
+# 61                 PR     108
+# 62                 MB      40
+# 63                 SK      30
+# 64                 FO      11
+# 65                 MX       4
+# 66                 NT       4
+
+#Que-3
+##check the number of tickets which don’t have the address for violation location on them
+## Violation address is assumed as a combination of house number, street name, interseting street and violation location
+violation_add_null<-SparkR::sql("select count(Summons_Number) tickets from df_2017_clean 
+                                where  House_Number is null and Street_Name is null and Intersecting_Street is null
+                                and Violation_Location is null")
+head(violation_add_null)
+#Ans 1081
+
+## ALTERNATE ASSUMPTION
+## Violation address is assumed as Violation_Location ONLY
+violation_add_null<-SparkR::sql("select count(Summons_Number) tickets from df_2017_clean 
+                                where  Violation_Location is null")
+head(violation_add_null)
+#Ans 1950083
+
+## Aggregation task
+
+#Que-1
+
+#How often does each violation code occur? Display the frequency of the top five violation codes.
+violation_code_freq<-SparkR::sql("select Violation_Code, count(Summons_Number) tickets from df_2017_clean
+                                 group by Violation_Code order by tickets desc")
+head(violation_code_freq,5)
+
+
+# Violation_Code tickets                                                        
+# 1             21 1500396
+# 2             36 1345237
+# 3             38 1050418
+# 4             14  880152
+# 5             20  609231
+
+#Que-2
+#How often does each 'vehicle body type' get a parking ticket? How about the 'vehicle make'? 
+vehicle_body_freq<-SparkR::sql("select Vehicle_Body_Type, count(Summons_Number) tickets from df_2017_clean
+                               group by Vehicle_Body_Type order by tickets desc")
+head(vehicle_body_freq,5)
+# Vehicle_Body_Type tickets                                                     
+# 1              SUBN 3632003
+# 2              4DSD 3017372
+# 3               VAN 1384121
+# 4              DELV  672123
+# 5               SDN  414984
+
+vehicle_make_freq<-SparkR::sql("select Vehicle_Make, count(Summons_Number) tickets from df_2017_clean
+                               group by Vehicle_Make order by tickets desc")
+head(vehicle_make_freq,5)
+# Vehicle_Make tickets                                                          
+# 1         FORD 1250777
+# 2        TOYOT 1179265
+# 3        HONDA 1052006
+# 4        NISSA  895225
+# 5        CHEVR  698024
+
+#Que-3
+#Find the (5 highest) frequency of tickets for Violation Precinct
+
+#A.Violation Precinct
+violation_precint_freq<-SparkR::sql("select Violation_Precinct, count(Summons_Number) tickets from df_2017_clean
+                                    where Violation_Precinct != 0 
+                                    group by Violation_Precinct order by tickets desc" )
+head(violation_precint_freq,5)
+# Violation_Precinct tickets                                                    
+# 1                 19  528317
+# 2                 14  347736
+# 3                  1  326961
+# 4                 18  302008
+# 5                114  292682
+
+#B.Issuer Precinct
+issuer_precint_freq<-SparkR::sql("select  Issuer_Precinct, count(Summons_Number) tickets from df_2017_clean
+                                 where  Issuer_Precinct != 0 
+                                 group by  Issuer_Precinct order by tickets desc" )
+head(issuer_precint_freq,5)
+
+# Issuer_Precinct tickets                                                       
+# 1              19  514786
+# 2              14  340862
+# 3               1  316776
+# 4              18  292237
+# 5             114  286316
+
+#Que-4
+#Find the violation code frequency across three precincts which have issued the most number of tickets
+
+# Most number of tickets issued are having violation code as 19, 14, 1
+
+### by using union all
+
+violation_code_issued_precint_freq<-SparkR::sql("select Violation_Code, count(Summons_Number) tickets from
+                                                (select  Violation_Code, Summons_Number  from df_2017_clean
+                                                where  Issuer_Precinct =19   
+                                                union all
+                                                select  Violation_Code, Summons_Number  from df_2017_clean
+                                                where  Issuer_Precinct =18  
+                                                union all
+                                                select  Violation_Code, Summons_Number  from df_2017_clean
+                                                where  Issuer_Precinct =14) group by Violation_Code order by tickets desc")
+head(violation_code_issued_precint_freq,10)
+
+# Violation_Code tickets                                                       
+# 1              14  220025
+# 2              46  112223
+# 3              69   98044
+# 4              38   89000
+# 5              37   78863
+# 6              31   63974
+# 7              21   59084
+# 8              47   55058
+# 9              20   38822
+# 10             16   37136
+
+##### ALTERNATIVE--- By avoiding union all
+violation_code_issued_precint_freq<-SparkR::sql("select  Violation_Code, count(Summons_Number) tickets from df_2017_clean
+                                                where  Issuer_Precinct in( 19,14,1) 
+                                                group by  Violation_Code order by tickets desc" )
+head(violation_code_issued_precint_freq,10)
+#Violation_Code tickets                                                       
+# 1              14  202400
+# 2              46  119956
+# 3              38   94025
+# 4              37   87454
+# 5              69   72817
+# 6              16   70611
+# 7              21   64230
+# 8              20   58872
+# 9              31   53622
+# 10             40   35431
+
+## OBSERVATION - violation code 14 and 46 have exceptionally high frequency.
+## Aanalyzing these across issuer precints.
+violation_code_high_precint_freq<-SparkR::sql("select Issuer_Precinct, count(Summons_Number) tickets 
+                                              from df_2017_clean where Violation_Code in ( 14,46) 
+                                              group by Issuer_Precinct order by tickets desc")
+
+
+head(violation_code_high_precint_freq, nrow(violation_code_high_precint_freq))
+
+### violation code 14 and 46 are found in 426 precints. The count of tickets is more than 100 in almost 99 precints
+
+# Issuer_Precinct tickets                                                     
+# 1                19  141662
+# 2                18  104539
+# 3                 1   94647
+# 4                14   86047
+# 5                17   44668
+# 6                10   35623
+# 7                84   35619
+# 8               109   33086
+# 9                20   32363
+# 10               13   29917
+# 11               34   29225
+# 12               23   27065
+# 13                9   26246
+# 14               33   24661
+# 15               52   23216
+# 16                6   22697
+# 17               24   21423
+# 18                5   20585
+# 19               70   20223
+# 20               46   18495
+# 21              112   17765
+# 22               49   17583
+# 23              114   17402
+# 24              103   17122
+# 25               68   16548
+# 26               61   16534
+# 27               90   16504
+# 28               43   16174
+# 29              108   15649
+# 30               67   14813
+# 31                7   14680
+# 32              115   14646
+# 33               44   13818
+# 34              110   13681
+# 35               40   13623
+# 36               28   13455
+# 37               71   13305
+# 38               66   13160
+# 39               26   12127
+# 40               48   12106
+# 41               47   12089
+# 42               25   11834
+# 43               62   11490
+# 44               77   11294
+# 45               79   10681
+# 46               88    9591
+# 47                0    9363
+# 48              104    9181
+# 49               75    9137
+# 50               72    9133
+# 51              107    9111
+# 52               32    9028
+# 53               78    8728
+# 54              401    8717
+# 55               45    8595
+# 56               94    8472
+# 57               30    8471
+# 58               41    8106
+# 59              102    7927
+# 60               60    7881
+# 61               83    7641
+# 62               50    7582
+# 63               42    6899
+# 64               76    6437
+# 65              105    6349
+# 66               63    5931
+# 67              120    5376
+# 68               69    5271
+# 69               81    5130
+# 70              106    4983
+# 71               73    4383
+# 72              113    4101
+# 73              111    4001
+# 74              420    3406
+# 75              122    2967
+# 76              161    2633
+# 77              100    2461
+# 78              101    2293
+# 79              121    1972
+# 80              406    1346
+# 81              405    1138
+# 82              123     853
+# 83              504     824
+# 84              642     674
+# 85              730     534
+# 86              977     409
+# 87              302     379
+# 88              839     354
+# 89                2     351
+# 90                4     282
+# 91              163     211
+# 92                3     210
+# 93              968     193
+# 94              883     147
+# 95               22     140
+# 96              506     136
+# 97              803     136
+# 98              976     121
+# 99              801     105
+# 100             808      94
+# 101             502      94
+# 102             501      93
+# 103             301      90
+# 104             837      87
+# 105             804      78
+# 106             805      73
+# 107             806      60
+# 108             162      55
+# 109             972      54
+# 110              29      53
+# 111             408      50
+# 112             824      48
+# 113             152      48
+# 114             869      44
+# 115             802      44
+# 116             822      42
+# 117             118      41
+# 118              27      40
+# 119              16      39
+# 120             483      38
+# 121             807      35
+# 122             985      35
+# 123             407      34
+# 124             402      34
+# 125             574      31
+# 126             136      29
+# 127             135      28
+# 128              37      27
+# 129             868      25
+# 130              15      25
+# 131              89      23
+# 132               8      23
+# 133             290      23
+# 134             982      21
+# 135             630      21
+# 136             800      20
+# 137              74      20
+# 138              39      19
+# 139              36      17
+# 140              97      17
+# 141             349      17
+# 142              65      16
+# 143              87      16
+# 144             141      16
+# 145              35      15
+# 146             172      15
+# 147             139      14
+# 148              31      14
+# 149             219      14
+# 150             169      13
+# 151              12      13
+# 152             860      13
+# 153             138      12
+# 154             530      12
+# 155             778      12
+# 156              80      11
+# 157              64      11
+# 158             117      11
+# 159             862      11
+# 160             400      11
+# 161             403      11
+# 162             625      11
+# 163             165      11
+# 164              99      11
+# 165             470      10
+# 166             409      10
+# 167              11      10
+# 168             276      10
+# 169              54       9
+# 170              82       9
+# 171             116       9
+# 172              59       8
+# 173             689       8
+# 174             119       7
+# 175              96       7
+# 176             231       7
+# 177             277       7
+# 178             863       7
+# 179             835       7
+# 180             189       7
+# 181             199       7
+# 182              85       7
+# 183              53       6
+# 184              91       6
+# 185             720       6
+# 186              98       6
+# 187             325       6
+# 188             447       6
+# 189             848       5
+# 190              93       5
+# 191             156       5
+# 192              86       5
+# 193             879       5
+# 194              57       5
+# 195             289       5
+# 196              92       5
+# 197              21       5
+# 198              58       5
+# 199             619       5
+# 200             149       5
+# 201             441       5
+# 202             282       5
+# 203             876       4
+# 204             643       4
+# 205             920       4
+# 206             565       4
+# 207             239       4
+# 208             142       4
+# 209             901       4
+# 210             186       4
+# 211             728       4
+# 212             222       4
+# 213              38       4
+# 214             404       4
+# 215             181       4
+# 216             249       4
+# 217             160       4
+# 218             849       4
+# 219             429       4
+# 220             430       3
+# 221             201       3
+# 222             440       3
+# 223             881       3
+# 224             209       3
+# 225             510       3
+# 226             167       3
+# 227             507       3
+# 228             303       3
+# 229             170       3
+# 230             421       3
+# 231             887       3
+# 232             892       3
+# 233             520       3
+# 234             877       3
+# 235             130       3
+# 236              51       3
+# 237             285       3
+# 238             779       3
+# 239             871       3
+# 240             477       3
+# 241             906       3
+# 242             200       3
+# 243             211       3
+# 244             461       3
+# 245             329       3
+# 246             905       3
+# 247             410       3
+# 248             864       3
+# 249             252       3
+# 250             701       3
+# 251             707       2
+# 252             830       2
+# 253             874       2
+# 254             667       2
+# 255             692       2
+# 256             719       2
+# 257             624       2
+# 258             601       2
+# 259             647       2
+# 260             166       2
+# 261             919       2
+# 262             339       2
+# 263             128       2
+# 264             620       2
+# 265             230       2
+# 266             709       2
+# 267             419       2
+# 268             729       2
+# 269             780       2
+# 270             827       2
+# 271             287       2
+# 272             513       2
+# 273             735       2
+# 274             865       2
+# 275             489       2
+# 276             872       2
+# 277             168       2
+# 278             942       2
+# 279             126       2
+# 280             164       2
+# 281             772       2
+# 282             220       2
+# 283             679       2
+# 284             439       2
+# 285             235       2
+# 286             214       2
+# 287             195       2
+# 288             809       2
+# 289             228       2
+# 290              56       2
+# 291             612       2
+# 292             870       2
+# 293             124       2
+# 294             503       2
+# 295             915       2
+# 296             471       1
+# 297             472       1
+# 298             133       1
+# 299             155       1
+# 300             296       1
+# 301             961       1
+# 302             939       1
+# 303             842       1
+# 304             159       1
+# 305             606       1
+# 306             460       1
+# 307             417       1
+# 308             663       1
+# 309             875       1
+# 310             330       1
+# 311             646       1
+# 312             300       1
+# 313             861       1
+# 314             132       1
+# 315             660       1
+# 316             674       1
+# 317             308       1
+# 318             925       1
+# 319             218       1
+# 320             223       1
+# 321             479       1
+# 322             333       1
+# 323             500       1
+# 324             171       1
+# 325             983       1
+# 326             634       1
+# 327             491       1
+# 328             650       1
+# 329             889       1
+# 330             246       1
+# 331             789       1
+# 332             826       1
+# 333             579       1
+# 334             154       1
+# 335             206       1
+# 336             992       1
+# 337             819       1
+# 338             512       1
+# 339             979       1
+# 340             263       1
+# 341             505       1
+# 342             423       1
+# 343             196       1
+# 344             880       1
+# 345             960       1
+# 346             669       1
+# 347              55       1
+# 348             449       1
+# 349             295       1
+# 350             922       1
+# 351             432       1
+# 352             428       1
+# 353             292       1
+# 354             389       1
+# 355             509       1
+# 356             320       1
+# 357             769       1
+# 358             266       1
+# 359             240       1
+# 360             560       1
+# 361             539       1
+# 362             641       1
+# 363             257       1
+# 364             622       1
+# 365             309       1
+# 366             931       1
+# 367             151       1
+# 368             997       1
+# 369             775       1
+# 370             179       1
+# 371             207       1
+# 372             726       1
+# 373             888       1
+# 374             316       1
+# 375             150       1
+# 376             546       1
+# 377             318       1
+# 378             158       1
+# 379             242       1
+# 380             820       1
+# 381             498       1
+# 382             437       1
+# 383             834       1
+# 384             700       1
+# 385             311       1
+# 386             823       1
+# 387             144       1
+# 388             878       1
+# 389             422       1
+# 390             176       1
+# 391             629       1
+# 392             736       1
+# 393             648       1
+# 394             661       1
+# 395             293       1
+# 396             938       1
+# 397             237       1
+# 398             818       1
+# 399              95       1
+# 400             490       1
+# 401             469       1
+# 402             828       1
+# 403             859       1
+# 404             433       1
+# 405             978       1
+# 406             534       1
+# 407             254       1
+# 408             426       1
+# 409             304       1
+# 410             541       1
+# 411             600       1
+# 412             975       1
+# 413             462       1
+# 414             270       1
+# 415             522       1
+# 416             131       1
+# 417             529       1
+# 418             281       1
+# 419             573       1
+# 420             761       1
+# 421             605       1
+# 422             927       1
+# 423             468       1
+# 424             265       1
+# 425             508       1
+# 426             284       1
+
+
+# Question 5 - Analyzing violation codes over day timeslots
+## Separating hour and am / pm value from violation time
+df_2017_clean$violation_time_hour<-SparkR::substr(df_2017_clean$Violation_Time,1,2)
+head(summarize(group_by(df_2017_clean,df_2017_clean$violation_time_hour),count=n(df_2017_clean$violation_time_hour)),200)
+
+df_2017_clean$violation_time_ampm<-SparkR::substr(df_2017_clean$Violation_Time,5,5)
+head(summarize(group_by(df_2017_clean,df_2017_clean$violation_time_ampm),count=n(df_2017_clean$violation_time_ampm)),100)
+
+## Creating view
+createOrReplaceTempView(df_2017_clean, "data_2017_violation_time")
+## Creating bins for 6 timeslots of the day. All incorrect, blank and null values of hour are put under bin as invalid. Same is not included in further analyis
+df_violation_time_bins <- SparkR::sql("SELECT Violation_Code, 
+                                      CASE  WHEN (violation_time_hour in ('00','01','02','03') and violation_time_ampm ='A')  THEN 'Midnight'
+                                      WHEN (violation_time_hour in ('04','05','06','07') and violation_time_ampm ='A')  THEN 'EarlyMorning'
+                                      WHEN (violation_time_hour in ('08','09','10','11') and violation_time_ampm ='A')  THEN 'Morning'
+                                      WHEN (violation_time_hour in ('12','01','02','03') and violation_time_ampm ='P')  THEN 'Afternoon'
+                                      WHEN (violation_time_hour in ('04','05','06','07') and violation_time_ampm ='P')  THEN 'Evening'
+                                      WHEN (violation_time_hour in ('08','09','10','11') and violation_time_ampm ='P')  THEN 'Night'
+                                      ELSE 'INVALID' END  as timeslot FROM data_2017_violation_time")
+
+
+createOrReplaceTempView(df_violation_time_bins, "data_2017_violation_time_bins")
+
+## Finding top 3 violoation code for each timeslot
+df_violation_time_code<-SparkR::sql("(SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2017_violation_time_bins where timeslot = 'Midnight' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2017_violation_time_bins where timeslot = 'EarlyMorning' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2017_violation_time_bins where timeslot = 'Morning' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2017_violation_time_bins where timeslot = 'Afternoon' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2017_violation_time_bins where timeslot = 'Evening' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)
+                                    union all
+                                    (SELECT timeslot, Violation_Code, count(*) tickets 
+                                    from data_2017_violation_time_bins where timeslot = 'Night' group by timeslot, Violation_Code 
+                                    order by tickets desc limit 3)")
+
+head(df_violation_time_code,25)
+
+
+# timeslot Violation_Code tickets
+# 1      Midnight             21   71727
+# 2      Midnight             40   44731
+# 3      Midnight             14   28727
+# 4  EarlyMorning             14  139373
+# 5  EarlyMorning             21  116862
+# 6  EarlyMorning             40  110630
+# 7       Morning             21 1161233
+# 8       Morning             36  726513
+# 9       Morning             38  343204
+# 10    Afternoon             36  563564
+# 11    Afternoon             38  457189
+# 12    Afternoon             37  332457
+# 13      Evening             38  200785
+# 14      Evening             37  143593
+# 15      Evening             14  142317
+# 16        Night              7   59134
+# 17        Night             38   46499
+# 18        Night             14   43889
+
+### Finding timeslots for 3 most commonly occuring violation codes
+
+df_top_3_violoation_code<-SparkR::sql("SELECT Violation_Code, count(*) tickets from data_2017_violation_time_bins 
+                                      group by  Violation_Code order by tickets desc limit 3")
+head(df_top_3_violoation_code)
+# Top 3 violation code are 21, 36, 38 
+# Violation_Code tickets                                                        
+# 1             21 1500396
+# 2             36 1345237
+# 3             38 1050418
+
+df_top_3_violoation_code_timeslot<-SparkR::sql("SELECT Violation_Code,timeslot, count(*) tickets from data_2017_violation_time_bins 
+                                               where Violation_Code in (21,36,38) and timeslot != 'INVALID'
+                                               group by  Violation_Code ,timeslot order by Violation_Code,tickets desc")
+
+head(df_top_3_violoation_code_timeslot, 25)
+
+### Top 3 violation (21, 36, 38) codes have highest occurance in morning and afternoon
+
+# Violation_Code     timeslot tickets                                          
+# 1              21      Morning 1161233
+# 2              21    Afternoon  145599
+# 3              21 EarlyMorning  116862
+# 4              21     Midnight   71727
+# 5              21      Evening     515
+# 6              21        Night     344
+# 7              36      Morning  726513
+# 8              36    Afternoon  563564
+# 9              36 EarlyMorning   30072
+# 10             36      Evening   25088
+# 11             38    Afternoon  457189
+# 12             38      Morning  343204
+# 13             38      Evening  200785
+# 14             38        Night   46499
+# 15             38 EarlyMorning    2281
+# 16             38     Midnight     357
+## 
+
+### Question 6 - finding seasonality
+
+## Assumed seasons - Spring -MArch to May, Summer - June to August, Fall - September to November, WInter-December to February
+
+#month(to_date(Issue_Date,'MM/dd/yyyy')) in (1,2,3,4,5,6)
+
+df_violation_season_bins <- SparkR::sql("SELECT Violation_Code, 
+                                        CASE  WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (3,4,5) ) THEN 'Spring'
+                                        WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (6,7,8) ) THEN 'Summer'
+                                        WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (9,10,11) ) THEN 'Fall'
+                                        WHEN (month(to_date(Issue_Date,'MM/dd/yyyy')) in (12,1,2) ) THEN 'Winter'
+                                        ELSE 'INVALID' END  as season FROM data_2017_violation_time")
+
+createOrReplaceTempView(df_violation_season_bins, "data_2017_violation_season_bins")
+
+df_violation_season_count<-SparkR::sql("SELECT season, count(*) tickets from data_2017_violation_season_bins
+                                       group by season order by tickets desc")
+head(df_violation_season_count,5)
+# season tickets                                                                
+# 1 Spring 2873383
+# 2   Fall 2829224
+# 3 Winter 2483036
+# 4 Summer 2353920
+
+## Maximum tickets are found in sring
+
+
+## Finding top 3 violoation code for each season
+df_violation_season_code<-SparkR::sql("(SELECT season, Violation_Code, count(*) tickets 
+                                      from data_2017_violation_season_bins where season = 'Spring' group by season, Violation_Code 
+                                      order by tickets desc limit 3)
+                                      union all
+                                      (SELECT season, Violation_Code, count(*) tickets 
+                                      from data_2017_violation_season_bins where season = 'Summer' group by season, Violation_Code 
+                                      order by tickets desc limit 3)
+                                      union all
+                                      (SELECT season, Violation_Code, count(*) tickets 
+                                      from data_2017_violation_season_bins where season = 'Fall' group by season, Violation_Code 
+                                      order by tickets desc limit 3)
+                                      union all
+                                      (SELECT season, Violation_Code, count(*) tickets 
+                                      from data_2017_violation_season_bins where season = 'Winter' group by season, Violation_Code 
+                                      order by tickets desc limit 3)
+                                      ")
+
+head(df_violation_season_code,20)
+# season Violation_Code tickets
+# 1  Spring             21  402424
+# 2  Spring             36  344834
+# 3  Spring             38  271167
+# 4  Summer             21  378699
+# 5  Summer             38  235725
+# 6  Summer             14  207495
+# 7    Fall             36  456046
+# 8    Fall             21  357257
+# 9    Fall             38  283816
+# 10 Winter             21  362016
+# 11 Winter             36  359338
+# 12 Winter             38  259710
+
+## Violation 21, 36 and 38 are found as most frequent code for most of the seasons
+
+## Question 7 -
+# top 3 violation codes as found above
+
+df_top_3_violoation_code<-SparkR::sql("SELECT Violation_Code, count(*) tickets from df_2017_clean 
+                                      group by  Violation_Code order by tickets desc limit 3")
+head(df_top_3_violoation_code)
+# Top 3 violation code are 21, 36, 38 
+# Violation_Code tickets                                                        
+# 1             21 1500396
+# 2             36 1345237
+# 3             38 1050418
+## CODE	DEFINITION
+#21	Street Cleaning: No parking where parking is not allowed by sign, street marking or traffic control device.
+#36	Exceeding the posted speed limit in or near a designated school zone.	
+#38	Parking Meter 
+
+#Finding Average Fine for Manhattan (Densly populated area)	and All Other Areas	
+##21		$65	$45	Average - 55
+##36		$50	$50	Average- 50
+##38		$65	$35	Average - 50
+
+### Finding penalties for each violation code based on the average fines
+
+df_fine_amount<-SparkR::sql("SELECT Violation_Code, 
+                            CASE WHEN Violation_Code = 21 THEN (55* count(*)) 
+                            WHEN Violation_Code = 36 THEN (50* count(*)) 
+                            WHEN Violation_Code = 38 THEN (50* count(*)) 
+                            ELSE 1 END as fine from df_2017_clean 
+                            group by  Violation_Code order by fine desc limit 3")
+
+head(df_fine_amount)
+# Violation_Code     fine                                                       
+# 1             21 82521780
+# 2             36 67261850
+# 3             38 52520900
+
+### Code 21 has highest collection of fine
+
+sparkR.stop()
